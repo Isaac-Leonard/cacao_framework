@@ -67,7 +67,6 @@ impl<
     pub fn on_message(&self, id: &usize) {
         if let Some(handler) = self.handlers.borrow_mut().get_mut(id) {
             handler(&mut *self.state.borrow_mut());
-            self.render()
         }
         // We need this check in a separate block to ensure the borrow of handler is dropped
         if self.handlers.borrow().contains_key(id) {
