@@ -9,11 +9,15 @@ mod tests {
     pub struct CustomComponent;
 
     impl Renderable for CustomComponent {
+        type Props = usize;
         type State = u32;
-        fn render(state: &Self::State) -> Vec<crate::component::Discripter<Self::State>> {
+        fn render(
+            _props: &Self::Props,
+            state: &Self::State,
+        ) -> Vec<crate::component::Discripter<Self::Props, Self::State>> {
             vec![
                 Discripter {
-                    kind: ComponentType::Button(Some(|state| *state += 1)),
+                    kind: ComponentType::Button(Some(|_, state| *state += 1)),
                     text: "Increment".to_string(),
                 },
                 Discripter {
