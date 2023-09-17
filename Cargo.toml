@@ -6,4 +6,4 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cacao = { git = "https://github.com/isaac-leonard/cacao", branch = "has-layout"}
+cacao = { git = "https://github.com/isaac-leonard/cacao", branch = "message_passing_changes"}

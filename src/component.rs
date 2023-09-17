@@ -14,7 +14,7 @@ use crate::layout::top_to_bottom;
 pub struct Component<
     S: Sized + Clone + PartialEq,
     T: Renderable<State = S>,
-    D: Dispatcher<Message = usize> + AppDelegate,
+    D: Dispatcher<usize> + AppDelegate,
 > {
     view: View,
     sub_views: RefCell<Vec<Box<dyn Layout>>>,
@@ -34,7 +34,7 @@ pub trait Renderable {
 impl<
         S: Sized + Clone + PartialEq,
         T: Renderable<State = S>,
-        D: Dispatcher<Message = usize> + AppDelegate,
+        D: Dispatcher<usize> + AppDelegate,
     > ViewDelegate for Component<S, T, D>
 {
     const NAME: &'static str = "custom_component";
@@ -48,7 +48,7 @@ impl<
 impl<
         S: Sized + Clone + PartialEq,
         T: Renderable<State = S>,
-        D: Dispatcher<Message = usize> + AppDelegate,
+        D: Dispatcher<usize> + AppDelegate,
     > Component<S, T, D>
 {
     pub fn new(state: S) -> Self {
