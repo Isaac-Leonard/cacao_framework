@@ -9,7 +9,7 @@ mod tests {
     pub struct CustomComponent;
 
     impl Renderable for CustomComponent {
-        type Props = usize;
+        type Props = ();
         type State = u32;
         fn render(
             _props: &Self::Props,
