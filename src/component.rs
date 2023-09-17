@@ -66,7 +66,10 @@ impl<
     /// Call this to let your component register button clicks
     pub fn on_message(&self, id: &usize) {
         if let Some(handler) = self.handlers.borrow_mut().get_mut(id) {
-            handler(&mut *self.state.borrow_mut());
+            // We need this in its own block, compiler can't work out this isn't red after we use it.
+            {
+                handler(&mut *self.state.borrow_mut());
+            }
             self.render()
         }
     }
