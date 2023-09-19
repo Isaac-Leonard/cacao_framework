@@ -11,37 +11,27 @@ use cacao::{
 
 use crate::layout::top_to_bottom;
 
-pub struct Component<
-    P: Clone + PartialEq,
-    S: Clone + PartialEq + Default,
-    T: Renderable<Props = P, State = S>,
-    D: Dispatcher<usize> + AppDelegate,
-> {
+pub struct Component<T: Renderable, D: Dispatcher<usize> + AppDelegate> {
     view: View,
     sub_views: RefCell<Vec<Box<dyn Layout>>>,
-    props: RefCell<P>,
-    state: RefCell<S>,
-    handlers: RefCell<HashMap<usize, fn(&P, &mut S)>>,
-    vdom: RefCell<Vec<Discripter<P, S>>>,
+    props: RefCell<T::Props>,
+    state: RefCell<T::State>,
+    handlers: RefCell<HashMap<usize, ClickHandler<T>>>,
+    vdom: RefCell<Vec<Discripter<T>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
 }
 
-pub trait Renderable {
+pub trait Renderable: Sized + PartialEq + Clone {
     type Props: Clone + PartialEq;
     type State: Clone + PartialEq + Default;
 
-    fn render(
-        props: &Self::Props,
-        state: &Self::State,
-    ) -> Vec<Discripter<Self::Props, Self::State>>;
+    fn render(props: &Self::Props, state: &Self::State) -> Vec<Discripter<Self>>;
 }
 
-impl<P, S, T, D> ViewDelegate for Component<P, S, T, D>
+impl<T, D> ViewDelegate for Component<T, D>
 where
-    P: Clone + PartialEq,
-    S: Clone + PartialEq + Default,
-    T: Renderable<Props = P, State = S>,
+    T: Renderable,
     D: Dispatcher<usize> + AppDelegate,
 {
     const NAME: &'static str = "custom_component";
@@ -52,14 +42,12 @@ where
 }
 
 // The clone and PartialEq requirements here are needed by the compiler despite never being called on S as parts of the virtual DOM do get cloned
-impl<P, S, T, D> Component<P, S, T, D>
+impl<T, D> Component<T, D>
 where
-    P: Clone + PartialEq,
-    S: Clone + PartialEq + Default,
-    T: Renderable<Props = P, State = S>,
+    T: Renderable,
     D: Dispatcher<usize> + AppDelegate,
 {
-    pub fn new(props: P) -> Self {
+    pub fn new(props: T::Props) -> Self {
         Self {
             view: View::new(),
             sub_views: Vec::new().into(),
@@ -83,7 +71,7 @@ where
         }
     }
 
-    pub fn update_props(&self, props: P) {
+    pub fn update_props(&self, props: T::Props) {
         *self.props.borrow_mut() = props;
         self.render();
     }
@@ -138,15 +126,15 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Discripter<P: PartialEq + Clone, S: PartialEq + Clone + Default> {
-    pub kind: ComponentType<P, S>,
+pub struct Discripter<T: Renderable> {
+    pub kind: ComponentType<T>,
     pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ComponentType<P, S> {
+pub enum ComponentType<T: Renderable> {
     Label,
-    Button(ClickHandler<P, S>),
+    Button(Option<ClickHandler<T>>),
 }
 
-type ClickHandler<P, S> = Option<fn(&P, &mut S)>;
+type ClickHandler<T> = fn(&<T as Renderable>::Props, &mut <T as Renderable>::State);

@@ -6,6 +6,7 @@ pub use component::*;
 mod tests {
     /// Demonstrates the implementation of a simple counter component
     use super::*;
+    #[derive(PartialEq, Clone)]
     pub struct CustomComponent;
 
     impl Renderable for CustomComponent {
@@ -14,7 +15,7 @@ mod tests {
         fn render(
             _props: &Self::Props,
             state: &Self::State,
-        ) -> Vec<crate::component::Discripter<Self::Props, Self::State>> {
+        ) -> Vec<crate::component::Discripter<Self>> {
             vec![
                 Discripter {
                     kind: ComponentType::Button(Some(|_, state| *state += 1)),
