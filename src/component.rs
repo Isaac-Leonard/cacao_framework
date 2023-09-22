@@ -113,8 +113,8 @@ pub struct VButton<T: Component + ?Sized> {
 }
 
 pub struct VComponent {
-    type_id: TypeId,
-    renderable: Box<dyn Renderable>,
+    pub type_id: TypeId,
+    pub renderable: Box<dyn Renderable>,
 }
 
 impl Clone for VComponent {
