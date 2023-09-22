@@ -1,4 +1,11 @@
-use std::{cell::RefCell, collections::HashMap, marker::PhantomData, sync::atomic};
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    collections::HashMap,
+    marker::PhantomData,
+    rc::Rc,
+    sync::atomic,
+};
 
 use cacao::{
     appkit::{App, AppDelegate},
@@ -11,50 +18,48 @@ use cacao::{
 
 use crate::layout::top_to_bottom;
 
-pub struct Component<T: Renderable, D: Dispatcher<usize> + AppDelegate> {
-    view: View,
-    sub_views: RefCell<Vec<Box<dyn Layout>>>,
-    props: RefCell<T::Props>,
-    state: RefCell<T::State>,
-    handlers: RefCell<HashMap<usize, ClickHandler<T>>>,
-    vdom: RefCell<Vec<Discripter<T>>>,
+pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<usize> + AppDelegate> {
+    props: Rc<RefCell<T::Props>>,
+    state: Rc<RefCell<T::State>>,
+    handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
+    parent_view: View,
+    sub_views: Rc<RefCell<Vec<Box<dyn Layout>>>>,
+    vdom: Rc<RefCell<Vec<VNode<T>>>>,
+    pub sub_components: Rc<RefCell<Vec<Box<dyn Renderable>>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
 }
 
-pub trait Renderable: Sized + PartialEq + Clone {
+pub trait Component {
     type Props: Clone + PartialEq;
     type State: Clone + PartialEq + Default;
 
-    fn render(props: &Self::Props, state: &Self::State) -> Vec<Discripter<Self>>;
+    fn render(props: &Self::Props, state: &Self::State) -> Vec<VNode<Self>>;
 }
 
-impl<T, D> ViewDelegate for Component<T, D>
-where
-    T: Renderable,
-    D: Dispatcher<usize> + AppDelegate,
-{
+impl ViewDelegate for &dyn Renderable {
     const NAME: &'static str = "custom_component";
     fn did_load(&mut self, view: cacao::view::View) {
         self.render();
-        view.add_subview(&self.view);
+        view.add_subview(self.get_parent_view());
     }
 }
 
 // The clone and PartialEq requirements here are needed by the compiler despite never being called on S as parts of the virtual DOM do get cloned
-impl<T, D> Component<T, D>
+impl<T, D> ComponentWrapper<T, D>
 where
-    T: Renderable,
-    D: Dispatcher<usize> + AppDelegate,
+    T: Component + PartialEq + Clone + 'static,
+    D: Dispatcher<usize> + AppDelegate + 'static,
 {
     pub fn new(props: T::Props) -> Self {
         Self {
-            view: View::new(),
-            sub_views: Vec::new().into(),
-            props: RefCell::new(props),
-            state: RefCell::default(),
-            handlers: RefCell::default(),
-            vdom: RefCell::default(),
+            parent_view: View::new(),
+            sub_views: Rc::default(),
+            props: Rc::new(RefCell::new(props)),
+            state: Rc::default(),
+            handlers: Rc::default(),
+            vdom: Rc::default(),
+            sub_components: Rc::default(),
             component: PhantomData,
             app: PhantomData,
         }
@@ -75,39 +80,126 @@ where
         *self.props.borrow_mut() = props;
         self.render();
     }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum VNode<T: Component + ?Sized> {
+    Label(VLabel),
+    Button(VButton<T>),
+    Custom(VComponent),
+}
+
+#[derive(Clone, PartialEq)]
+pub struct VLabel {
+    pub text: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct VButton<T: Component + ?Sized> {
+    pub click: Option<ClickHandler<T>>,
+    pub text: String,
+}
+
+pub struct VComponent {
+    type_id: TypeId,
+    renderable: Box<dyn Renderable>,
+}
+
+impl Clone for VComponent {
+    fn clone(&self) -> Self {
+        Self {
+            type_id: self.type_id,
+            renderable: self.renderable.copy(),
+        }
+    }
+}
+
+impl PartialEq for VComponent {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id == other.type_id && self.renderable.equal_to(other.renderable.as_ref())
+    }
+}
+
+type ClickHandler<T> = fn(&<T as Component>::Props, &mut <T as Component>::State);
+
+pub trait Renderable {
+    fn copy(&self) -> Box<dyn Renderable>;
+    fn as_any(&self) -> &dyn Any;
+    fn equal_to(&self, other: &dyn Renderable) -> bool;
+    fn render(&self);
+    fn get_parent_view(&self) -> &View;
+}
+
+impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usize> + 'static>
+    Renderable for ComponentWrapper<T, D>
+{
+    fn copy(&self) -> Box<dyn Renderable> {
+        let wrapper: ComponentWrapper<T, D> = ComponentWrapper {
+            props: Rc::clone(&self.props),
+            state: Rc::clone(&self.state),
+            handlers: Rc::clone(&self.handlers),
+            vdom: Rc::clone(&self.vdom),
+            sub_views: Rc::clone(&self.sub_views),
+            parent_view: self.parent_view.clone_as_handle(),
+            sub_components: Rc::clone(&self.sub_components),
+            component: PhantomData,
+            app: PhantomData,
+        };
+        Box::new(wrapper)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn equal_to(&self, other: &dyn Renderable) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .map(|rhs| self.props == rhs.props)
+            .unwrap_or(false)
+    }
 
     fn render(&self) {
         static COUNTER: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
         let mut button_handlers = self.handlers.borrow_mut();
-        let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
-        let mut last_vdom = self.vdom.borrow_mut();
-        if *last_vdom == vdom {
-            return;
-        }
-        let vdom_len = vdom.len();
         let mut sub_views_ptr = self.sub_views.borrow_mut();
+        let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
+        let vdom_len = vdom.len();
+        let mut last_vdom = self.vdom.borrow_mut();
         for (i, component) in vdom.into_iter().enumerate() {
             if last_vdom.len() <= i || last_vdom[i] != component {
                 last_vdom.insert(i, component.clone());
-                let new_component = match component.kind {
-                    ComponentType::Label => {
+                let new_component = match component {
+                    VNode::Custom(component) => {
+                        let mut sub_components = self.sub_components.borrow_mut();
+                        sub_components.push(component.renderable);
+                        let view = View::new();
+                        sub_components
+                            .last()
+                            .unwrap()
+                            .as_ref()
+                            .did_load(view.clone_as_handle());
+                        self.parent_view.add_subview(&view);
+                        Box::new(view) as Box<dyn Layout>
+                    }
+                    VNode::Label(data) => {
                         let label = Label::new();
-                        label.set_text(component.text);
-                        self.view.add_subview(&label);
+                        label.set_text(data.text);
+                        self.parent_view.add_subview(&label);
                         Box::new(label) as Box<dyn Layout>
                     }
-                    ComponentType::Button(handler) => {
-                        let mut btn = Button::new(component.text.as_ref());
-                        if let Some(handler) = handler {
+                    VNode::Button(button) => {
+                        let mut btn = Button::new(button.text.as_ref());
+                        if let Some(handler) = button.click {
                             let id = COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
                             button_handlers.insert(id, handler);
                             btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
                         }
-                        self.view.add_subview(&btn);
+                        self.parent_view.add_subview(&btn);
                         Box::new(btn) as Box<dyn Layout>
                     }
                 };
-                self.view.add_subview(new_component.as_ref());
+                self.parent_view.add_subview(new_component.as_ref());
                 sub_views_ptr.insert(i, new_component);
             }
         }
@@ -119,22 +211,11 @@ where
         sub_views_ptr.truncate(vdom_len);
         LayoutConstraint::activate(&top_to_bottom(
             sub_views_ptr.iter().map(|view| view.as_ref()).collect(),
-            &self.view,
+            &self.parent_view,
             8.,
         ));
     }
+    fn get_parent_view(&self) -> &View {
+        &self.parent_view
+    }
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Discripter<T: Renderable> {
-    pub kind: ComponentType<T>,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ComponentType<T: Renderable> {
-    Label,
-    Button(Option<ClickHandler<T>>),
-}
-
-type ClickHandler<T> = fn(&<T as Renderable>::Props, &mut <T as Renderable>::State);
