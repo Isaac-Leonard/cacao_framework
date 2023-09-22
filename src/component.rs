@@ -45,6 +45,18 @@ impl ViewDelegate for &dyn Renderable {
     }
 }
 
+impl<T, D> ViewDelegate for ComponentWrapper<T, D>
+where
+    T: Component + Clone + PartialEq + 'static,
+    D: Dispatcher<usize> + AppDelegate + 'static,
+{
+    const NAME: &'static str = "custom_component";
+    fn did_load(&mut self, view: cacao::view::View) {
+        self.render();
+        view.add_subview(self.get_parent_view());
+    }
+}
+
 // The clone and PartialEq requirements here are needed by the compiler despite never being called on S as parts of the virtual DOM do get cloned
 impl<T, D> ComponentWrapper<T, D>
 where
