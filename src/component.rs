@@ -85,6 +85,10 @@ where
         // We need this check in a separate block to ensure the borrow of handler is dropped
         if self.handlers.borrow().contains_key(id) {
             self.render()
+        } else {
+            for comp in self.sub_components.borrow().iter() {
+                comp.on_message(id)
+            }
         }
     }
 
@@ -140,6 +144,7 @@ pub trait Renderable {
     fn equal_to(&self, other: &dyn Renderable) -> bool;
     fn render(&self);
     fn get_parent_view(&self) -> &View;
+    fn on_message(&self, id: &usize);
 }
 
 impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usize> + 'static>
@@ -227,7 +232,11 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
             8.,
         ));
     }
+
     fn get_parent_view(&self) -> &View {
         &self.parent_view
+    }
+    fn on_message(&self, id: &usize) {
+        self.on_message(id)
     }
 }
