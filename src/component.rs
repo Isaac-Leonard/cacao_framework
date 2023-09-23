@@ -121,6 +121,19 @@ pub struct VComponent {
     pub renderable: Box<dyn Renderable>,
 }
 
+impl VComponent {
+    pub fn new<T, D>(props: T::Props) -> Self
+    where
+        T: Component + Clone + PartialEq + 'static,
+        D: AppDelegate + Dispatcher<usize> + 'static,
+    {
+        Self {
+            type_id: TypeId::of::<T>(),
+            renderable: Box::new(ComponentWrapper::<T, D>::new(props)),
+        }
+    }
+}
+
 impl Clone for VComponent {
     fn clone(&self) -> Self {
         Self {
