@@ -96,6 +96,46 @@ where
         *self.props.borrow_mut() = props;
         self.render();
     }
+
+    fn create_component(&self, vnode: &mut VNode<T>) -> Box<dyn Layout> {
+        match vnode {
+            VNode::Custom(component) => {
+                let view = View::new();
+                component
+                    .renderable
+                    .as_ref()
+                    .did_load(view.clone_as_handle());
+                Box::new(view) as Box<dyn Layout>
+            }
+            VNode::Label(data) => {
+                let label = Label::new();
+                label.set_text(&data.text);
+                Box::new(label) as Box<dyn Layout>
+            }
+            VNode::Button(button) => {
+                let mut btn = Button::new(button.text.as_ref());
+                if let Some(handler) = button.click {
+                    let id = gen_id();
+                    self.handlers.borrow_mut().insert(id, handler);
+                    btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
+                }
+                Box::new(btn) as Box<dyn Layout>
+            }
+        }
+    }
+
+    fn diff_nodes(&self, a: &VNode<T>, b: VNode<T>) -> Vec<VDomDiff<T>> {
+        match (a, b) {
+            (VNode::Label(a), VNode::Label(b)) => {
+                if a.text != b.text {
+                    vec![VDomDiff::UpdateLabelText(b.text)]
+                } else {
+                    Vec::new()
+                }
+            }
+            (_, b) => vec![VDomDiff::ReplaceWith(b)],
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -190,7 +230,6 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
     }
 
     fn render(&self) {
-        static COUNTER: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
         let mut button_handlers = self.handlers.borrow_mut();
         let mut sub_views_ptr = self.sub_views.borrow_mut();
         let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
@@ -221,7 +260,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
                     VNode::Button(button) => {
                         let mut btn = Button::new(button.text.as_ref());
                         if let Some(handler) = button.click {
-                            let id = COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
+                            let id = gen_id();
                             button_handlers.insert(id, handler);
                             btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
                         }
@@ -266,4 +305,18 @@ impl DowncastLayout for Box<dyn Layout> {
     fn downcast<T: Layout + Any>(&mut self) -> &T {
         self.as_any().downcast_ref::<T>().unwrap()
     }
+}
+
+fn gen_id() -> usize {
+    static COUNTER: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
+    COUNTER.fetch_add(1, atomic::Ordering::SeqCst)
+}
+
+pub enum VDomDiff<T: Component> {
+    UpdateLabelText(String),
+    UpdateButtonText(String),
+    UpdateButtonClick(Option<ClickHandler<T>>),
+    UpdatePropsFrom(VComponent),
+    InsertNode(VNode<T>),
+    ReplaceWith(VNode<T>),
 }
