@@ -23,9 +23,8 @@ pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<usiz
     state: Rc<RefCell<T::State>>,
     handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     parent_view: View,
-    sub_views: Rc<RefCell<Vec<Box<dyn Layout>>>>,
-    vdom: Rc<RefCell<Vec<VNode<T>>>>,
-    pub sub_components: Rc<RefCell<Vec<Box<dyn Renderable>>>>,
+    sub_views: Rc<RefCell<HashMap<usize, Box<dyn Layout>>>>,
+    vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
 }
@@ -71,7 +70,6 @@ where
             state: Rc::default(),
             handlers: Rc::default(),
             vdom: Rc::default(),
-            sub_components: Rc::default(),
             component: PhantomData,
             app: PhantomData,
         }
@@ -86,8 +84,10 @@ where
         if self.handlers.borrow().contains_key(id) {
             self.render()
         } else {
-            for comp in self.sub_components.borrow().iter() {
-                comp.on_message(id)
+            for (_, comp) in self.vdom.borrow().iter() {
+                if let VNode::Custom(comp) = comp {
+                    comp.renderable.on_message(id)
+                }
             }
         }
     }
@@ -143,6 +143,32 @@ pub enum VNode<T: Component + ?Sized> {
     Label(VLabel),
     Button(VButton<T>),
     Custom(VComponent),
+}
+
+impl<T: Component + ?Sized> VNode<T> {
+    pub fn as_button(&self) -> Option<&VButton<T>> {
+        if let Self::Button(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_label(&self) -> Option<&VLabel> {
+        if let Self::Label(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_custom(&self) -> Option<&VComponent> {
+        if let Self::Custom(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -211,7 +237,6 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
             vdom: Rc::clone(&self.vdom),
             sub_views: Rc::clone(&self.sub_views),
             parent_view: self.parent_view.clone_as_handle(),
-            sub_components: Rc::clone(&self.sub_components),
             component: PhantomData,
             app: PhantomData,
         };
@@ -234,50 +259,51 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
         let mut sub_views_ptr = self.sub_views.borrow_mut();
         let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
         let vdom_len = vdom.len();
-        let mut last_vdom = self.vdom.borrow_mut();
-        for (i, (_key, component)) in vdom.into_iter().enumerate() {
-            if last_vdom.len() <= i || last_vdom[i] != component {
-                last_vdom.insert(i, component.clone());
-                let new_component = match component {
-                    VNode::Custom(component) => {
-                        let mut sub_components = self.sub_components.borrow_mut();
-                        sub_components.push(component.renderable);
-                        let view = View::new();
-                        sub_components
-                            .last()
-                            .unwrap()
-                            .as_ref()
-                            .did_load(view.clone_as_handle());
-                        self.parent_view.add_subview(&view);
-                        Box::new(view) as Box<dyn Layout>
-                    }
-                    VNode::Label(data) => {
-                        let label = Label::new();
-                        label.set_text(data.text);
-                        self.parent_view.add_subview(&label);
-                        Box::new(label) as Box<dyn Layout>
-                    }
-                    VNode::Button(button) => {
-                        let mut btn = Button::new(button.text.as_ref());
-                        if let Some(handler) = button.click {
-                            let id = gen_id();
-                            button_handlers.insert(id, handler);
-                            btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
-                        }
-                        self.parent_view.add_subview(&btn);
-                        Box::new(btn) as Box<dyn Layout>
-                    }
+        let changes = vdom
+            .into_iter()
+            .map(|(key, node)| {
+                let vdom = self.vdom.borrow();
+                let existing_component = vdom.get(&key);
+                let changes = match existing_component {
+                    Some(existing_component) => self.diff_nodes(existing_component, node),
+                    None => VDomDiff::InsertNode(node),
                 };
-                self.parent_view.add_subview(new_component.as_ref());
-                sub_views_ptr.insert(i, new_component);
+                changes
+                    .into_iter()
+                    .map(|change| (key, change))
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        for (key, change) in changes {
+            let sub_views = self.sub_views.borrow_mut();
+            let vdom = self.vdom.borrow_mut();
+            match change {
+                VDomDiff::InsertNode(node) => {
+                    let view = self.create_component(node);
+                    sub_views.insert(key, view);
+                    vdom.insert(key, node);
+                }
+                VDomDiff::ReplaceWith(node) => {
+                    vdom.remove(&key);
+                    let view = self.create_component(node);
+                    sub_views.insert(key, view);
+                    vdom.insert(key, node);
+                }
+                VDomDiff::UpdateLabelText(text) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    let label = sub_views.get(&key).unwrap();
+                    label.downcast::<Label>().set_text(&text);
+                    node.as_label().unwrap().text = text;
+                }
+                VDomDiff::UpdateButtonText(text) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    let button = sub_views.get(&key).unwrap();
+                    button.downcast::<Button>().set_text(&text);
+                    node.as_button().unwrap().text = text;
+                }
             }
         }
-        last_vdom.truncate(vdom_len);
-        sub_views_ptr
-            .iter()
-            .skip(vdom_len)
-            .for_each(|view| view.remove_from_superview());
-        sub_views_ptr.truncate(vdom_len);
         LayoutConstraint::activate(&top_to_bottom(
             sub_views_ptr.iter().map(|view| view.as_ref()).collect(),
             &self.parent_view,
