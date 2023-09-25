@@ -154,7 +154,23 @@ impl<T: Component + ?Sized> VNode<T> {
         }
     }
 
+    pub fn as_button_mut(&mut self) -> Option<&mut VButton<T>> {
+        if let Self::Button(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
     pub fn as_label(&self) -> Option<&VLabel> {
+        if let Self::Label(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_label_mut(&mut self) -> Option<&mut VLabel> {
         if let Self::Label(v) = self {
             Some(v)
         } else {
@@ -221,6 +237,8 @@ pub trait Renderable {
     fn copy(&self) -> Box<dyn Renderable>;
     fn as_any(&self) -> &dyn Any;
     fn equal_to(&self, other: &dyn Renderable) -> bool;
+    fn same_component_as(&self, other: &dyn Renderable) -> bool;
+    fn update_props_from(&self, other: &dyn Renderable);
     fn render(&self);
     fn get_parent_view(&self) -> &View;
     fn on_message(&self, id: &usize);
@@ -253,62 +271,109 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
             .map(|rhs| self.props == rhs.props)
             .unwrap_or(false)
     }
+    fn same_component_as(&self, other: &dyn Renderable) -> bool {
+        other.as_any().is::<Self>()
+    }
+    fn update_props_from(&self, other: &dyn Renderable) {
+        self.update_props(
+            other
+                .as_any()
+                .downcast_ref::<Self>()
+                .unwrap()
+                .props
+                .borrow()
+                .clone(),
+        );
+    }
 
     fn render(&self) {
-        let mut button_handlers = self.handlers.borrow_mut();
-        let mut sub_views_ptr = self.sub_views.borrow_mut();
         let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
-        let vdom_len = vdom.len();
+        let keys_to_render = vdom.iter().map(|(key, _)| *key).collect::<Vec<_>>();
         let changes = vdom
             .into_iter()
-            .map(|(key, node)| {
+            .flat_map(|(key, node)| {
                 let vdom = self.vdom.borrow();
                 let existing_component = vdom.get(&key);
                 let changes = match existing_component {
                     Some(existing_component) => self.diff_nodes(existing_component, node),
-                    None => VDomDiff::InsertNode(node),
+                    None => vec![VDomDiff::InsertNode(node)],
                 };
                 changes
                     .into_iter()
                     .map(|change| (key, change))
                     .collect::<Vec<_>>()
             })
-            .flatten()
             .collect::<Vec<_>>();
         for (key, change) in changes {
-            let sub_views = self.sub_views.borrow_mut();
-            let vdom = self.vdom.borrow_mut();
+            let mut sub_views = self.sub_views.borrow_mut();
+            let mut vdom = self.vdom.borrow_mut();
             match change {
-                VDomDiff::InsertNode(node) => {
-                    let view = self.create_component(node);
+                VDomDiff::InsertNode(mut node) => {
+                    let view = self.create_component(&mut node);
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
-                VDomDiff::ReplaceWith(node) => {
+                VDomDiff::ReplaceWith(mut node) => {
                     vdom.remove(&key);
-                    let view = self.create_component(node);
+                    sub_views.remove(&key).unwrap().remove_from_superview();
+                    let view = self.create_component(&mut node);
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
                 VDomDiff::UpdateLabelText(text) => {
                     let node = vdom.get_mut(&key).unwrap();
-                    let label = sub_views.get(&key).unwrap();
+                    let label = sub_views.get_mut(&key).unwrap();
                     label.downcast::<Label>().set_text(&text);
-                    node.as_label().unwrap().text = text;
+                    node.as_label_mut().unwrap().text = text;
                 }
                 VDomDiff::UpdateButtonText(text) => {
                     let node = vdom.get_mut(&key).unwrap();
-                    let button = sub_views.get(&key).unwrap();
+                    let button = sub_views.get_mut(&key).unwrap();
                     button.downcast::<Button>().set_text(&text);
-                    node.as_button().unwrap().text = text;
+                    node.as_button_mut().unwrap().text = text;
+                }
+                VDomDiff::UpdateButtonClick(handler) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    let button = sub_views.get_mut(&key).unwrap();
+                    node.as_button_mut().unwrap().click = handler;
+                    if let Some(handler) = handler {
+                        let id = gen_id();
+                        self.handlers.borrow_mut().insert(id, handler);
+                        button
+                            .downcast::<Button>()
+                            .set_action(move |_| App::<D, usize>::dispatch_main(id));
+                    } else {
+                        button.downcast::<Button>().set_action(|_| {});
+            }
+        }
+                VDomDiff::UpdatePropsFrom(component) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    node.as_custom()
+                        .unwrap()
+                        .renderable
+                        .as_ref()
+                        .update_props_from(component.renderable.as_ref());
                 }
             }
         }
-        LayoutConstraint::activate(&top_to_bottom(
-            sub_views_ptr.iter().map(|view| view.as_ref()).collect(),
-            &self.parent_view,
-            8.,
-        ));
+        let mut vdom = self.vdom.borrow_mut();
+        let keys_to_remove = vdom
+            .keys()
+            .filter(|key| !keys_to_render.contains(key))
+            .copied()
+            .collect::<Vec<_>>();
+        let mut sub_views = self.sub_views.borrow_mut();
+        for key in keys_to_remove {
+            vdom.remove(&key);
+            if let Some(x) = sub_views.remove(&key) {
+                x.remove_from_superview()
+            }
+        }
+        let views_to_render = keys_to_render
+            .iter()
+            .map(|key| sub_views.get(key).unwrap().as_ref())
+            .collect::<Vec<_>>();
+        LayoutConstraint::activate(&top_to_bottom(views_to_render, &self.parent_view, 8.));
     }
 
     fn get_parent_view(&self) -> &View {
@@ -320,16 +385,16 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
 }
 
 pub trait DowncastLayout {
-    fn as_any(&mut self) -> &dyn Any;
-    fn downcast<T: Layout + Any>(&mut self) -> &T;
+    fn as_any(&mut self) -> &mut dyn Any;
+    fn downcast<T: Layout + Any>(&mut self) -> &mut T;
 }
 
 impl DowncastLayout for Box<dyn Layout> {
-    fn as_any(&mut self) -> &dyn Any {
-        &*self
+    fn as_any(&mut self) -> &mut dyn Any {
+        &mut *self
     }
-    fn downcast<T: Layout + Any>(&mut self) -> &T {
-        self.as_any().downcast_ref::<T>().unwrap()
+    fn downcast<T: Layout + Any>(&mut self) -> &mut T {
+        self.as_any().downcast_mut::<T>().unwrap()
     }
 }
 
