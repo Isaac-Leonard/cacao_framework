@@ -23,7 +23,7 @@ pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<usiz
     state: Rc<RefCell<T::State>>,
     handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     parent_view: View,
-    sub_views: Rc<RefCell<HashMap<usize, Box<dyn Layout>>>>,
+    sub_views: Rc<RefCell<HashMap<usize, CacaoComponent>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
@@ -100,7 +100,7 @@ where
         self.render();
     }
 
-    fn create_component(&self, vnode: &mut VNode<T>) -> Box<dyn Layout> {
+    fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent {
         match vnode {
             VNode::Custom(component) => {
                 let view = View::new();
@@ -108,12 +108,12 @@ where
                     .renderable
                     .as_ref()
                     .did_load(view.clone_as_handle());
-                Box::new(view) as Box<dyn Layout>
+                CacaoComponent::View(view)
             }
             VNode::Label(data) => {
                 let label = Label::new();
                 label.set_text(&data.text);
-                Box::new(label) as Box<dyn Layout>
+                CacaoComponent::Label(label)
             }
             VNode::Button(button) => {
                 let mut btn = Button::new(button.text.as_ref());
@@ -122,7 +122,7 @@ where
                     self.handlers.borrow_mut().insert(id, handler);
                     btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
                 }
-                Box::new(btn) as Box<dyn Layout>
+                CacaoComponent::Button(btn)
             }
         }
     }
@@ -313,28 +313,32 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
             match change {
                 VDomDiff::InsertNode(mut node) => {
                     let view = self.create_component(&mut node);
-                    self.parent_view.add_subview(view.as_ref());
+                    self.parent_view.add_subview(view.as_layout());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
                 VDomDiff::ReplaceWith(mut node) => {
                     vdom.remove(&key);
-                    sub_views.remove(&key).unwrap().remove_from_superview();
+                    sub_views
+                        .remove(&key)
+                        .unwrap()
+                        .as_layout()
+                        .remove_from_superview();
                     let view = self.create_component(&mut node);
-                    self.parent_view.add_subview(view.as_ref());
+                    self.parent_view.add_subview(view.as_layout());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
                 VDomDiff::UpdateLabelText(text) => {
                     let node = vdom.get_mut(&key).unwrap();
                     let label = sub_views.get_mut(&key).unwrap();
-                    label.downcast::<Label>().set_text(&text);
+                    label.as_label().unwrap().set_text(&text);
                     node.as_label_mut().unwrap().text = text;
                 }
                 VDomDiff::UpdateButtonText(text) => {
                     let node = vdom.get_mut(&key).unwrap();
                     let button = sub_views.get_mut(&key).unwrap();
-                    button.downcast::<Button>().set_text(&text);
+                    button.as_button_mut().unwrap().set_text(&text);
                     node.as_button_mut().unwrap().text = text;
                 }
                 VDomDiff::UpdateButtonClick(handler) => {
@@ -345,12 +349,13 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
                         let id = gen_id();
                         self.handlers.borrow_mut().insert(id, handler);
                         button
-                            .downcast::<Button>()
+                            .as_button_mut()
+                            .unwrap()
                             .set_action(move |_| App::<D, usize>::dispatch_main(id));
                     } else {
-                        button.downcast::<Button>().set_action(|_| {});
-            }
-        }
+                        button.as_button_mut().unwrap().set_action(|_| {});
+                    }
+                }
                 VDomDiff::UpdatePropsFrom(component) => {
                     let node = vdom.get_mut(&key).unwrap();
                     node.as_custom()
@@ -371,12 +376,12 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
         for key in keys_to_remove {
             vdom.remove(&key);
             if let Some(x) = sub_views.remove(&key) {
-                x.remove_from_superview()
+                x.as_layout().remove_from_superview()
             }
         }
         let views_to_render = keys_to_render
             .iter()
-            .map(|key| sub_views.get(key).unwrap().as_ref())
+            .map(|key| sub_views.get(key).unwrap().as_layout())
             .collect::<Vec<_>>();
         LayoutConstraint::activate(&top_to_bottom(views_to_render, &self.parent_view, 8.));
     }
@@ -389,17 +394,67 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
     }
 }
 
-pub trait DowncastLayout {
-    fn as_any(&mut self) -> &mut dyn Any;
-    fn downcast<T: Layout + Any>(&mut self) -> &mut T;
+pub enum CacaoComponent {
+    Label(Label),
+    Button(Button),
+    View(View),
 }
 
-impl DowncastLayout for Box<dyn Layout> {
-    fn as_any(&mut self) -> &mut dyn Any {
-        &mut *self
+impl CacaoComponent {
+    pub fn as_label(&self) -> Option<&Label> {
+        if let Self::Label(v) = self {
+            Some(v)
+        } else {
+            None
+        }
     }
-    fn downcast<T: Layout + Any>(&mut self) -> &mut T {
-        self.as_any().downcast_mut::<T>().unwrap()
+
+    pub fn as_label_mut(&mut self) -> Option<&mut Label> {
+        if let Self::Label(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_button(&self) -> Option<&Button> {
+        if let Self::Button(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_button_mut(&mut self) -> Option<&mut Button> {
+        if let Self::Button(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_view(&self) -> Option<&View> {
+        if let Self::View(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_view_mut(&mut self) -> Option<&mut View> {
+        if let Self::View(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    fn as_layout(&self) -> &dyn Layout {
+        match self {
+            CacaoComponent::Label(label) => label,
+            CacaoComponent::Button(button) => button,
+            CacaoComponent::View(view) => view,
+        }
     }
 }
 
