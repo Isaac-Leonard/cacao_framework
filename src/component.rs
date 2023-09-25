@@ -136,6 +136,26 @@ where
                     Vec::new()
                 }
             }
+            (VNode::Button(a), VNode::Button(b)) => {
+                let mut changes = Vec::new();
+                if a.text != b.text {
+                    changes.push(VDomDiff::UpdateButtonText(b.text))
+                }
+                if a.click != b.click {
+                    changes.push(VDomDiff::UpdateButtonClick(b.click))
+                }
+                changes
+            }
+            (VNode::Custom(a), VNode::Custom(b)) => {
+                if *a == b {
+                    Vec::new()
+                } else if a.renderable.same_component_as(b.renderable.as_ref()) {
+                    vec![VDomDiff::UpdatePropsFrom(b)]
+                } else {
+                    // Both are custom components but different kinds so we must replace it
+                    vec![VDomDiff::ReplaceWith(VNode::Custom(b))]
+                }
+            }
             (_, b) => vec![VDomDiff::ReplaceWith(b)],
         }
     }
