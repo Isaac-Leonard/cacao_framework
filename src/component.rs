@@ -81,7 +81,7 @@ where
             handler(&*self.props.borrow(), &mut *self.state.borrow_mut());
         }
         // We need this check in a separate block to ensure the borrow of handler is dropped
-        if self.handlers.borrow().contains_key(id) {
+        if self.has_handler_for(id) {
             self.render()
         } else {
             for (_, comp) in self.vdom.borrow().iter() {
@@ -92,6 +92,9 @@ where
         }
     }
 
+    fn has_handler_for(&self, id: &usize) -> bool {
+        self.handlers.borrow().contains_key(id)
+    }
     pub fn update_props(&self, props: T::Props) {
         *self.props.borrow_mut() = props;
         self.render();
