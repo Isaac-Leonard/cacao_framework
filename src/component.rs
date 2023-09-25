@@ -310,6 +310,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
             match change {
                 VDomDiff::InsertNode(mut node) => {
                     let view = self.create_component(&mut node);
+                    self.parent_view.add_subview(view.as_ref());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
@@ -317,6 +318,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
                     vdom.remove(&key);
                     sub_views.remove(&key).unwrap().remove_from_superview();
                     let view = self.create_component(&mut node);
+                    self.parent_view.add_subview(view.as_ref());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
