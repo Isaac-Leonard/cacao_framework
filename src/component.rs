@@ -34,7 +34,7 @@ pub trait Component {
     type Props: Clone + PartialEq;
     type State: Clone + PartialEq + Default;
 
-    fn render(props: &Self::Props, state: &Self::State) -> Vec<VNode<Self>>;
+    fn render(props: &Self::Props, state: &Self::State) -> Vec<(usize, VNode<Self>)>;
 }
 
 impl ViewDelegate for &dyn Renderable {
@@ -196,7 +196,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
         let vdom = T::render(&*self.props.borrow(), &*self.state.borrow());
         let vdom_len = vdom.len();
         let mut last_vdom = self.vdom.borrow_mut();
-        for (i, component) in vdom.into_iter().enumerate() {
+        for (i, (_key, component)) in vdom.into_iter().enumerate() {
             if last_vdom.len() <= i || last_vdom[i] != component {
                 last_vdom.insert(i, component.clone());
                 let new_component = match component {
@@ -251,5 +251,19 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
     }
     fn on_message(&self, id: &usize) {
         self.on_message(id)
+    }
+}
+
+pub trait DowncastLayout {
+    fn as_any(&mut self) -> &dyn Any;
+    fn downcast<T: Layout + Any>(&mut self) -> &T;
+}
+
+impl DowncastLayout for Box<dyn Layout> {
+    fn as_any(&mut self) -> &dyn Any {
+        &*self
+    }
+    fn downcast<T: Layout + Any>(&mut self) -> &T {
+        self.as_any().downcast_ref::<T>().unwrap()
     }
 }
