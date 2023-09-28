@@ -10,6 +10,7 @@ use std::{
 use cacao::{
     appkit::{App, AppDelegate},
     button::Button,
+    input::TextFieldDelegate,
     layout::{Layout, LayoutConstraint},
     notification_center::Dispatcher,
     text::Label,
@@ -18,10 +19,12 @@ use cacao::{
 
 use crate::layout::top_to_bottom;
 
-pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<usize> + AppDelegate> {
+pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Message> + AppDelegate>
+{
     props: Rc<RefCell<T::Props>>,
     state: Rc<RefCell<T::State>>,
-    handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
+    click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
+    change_handlers: Rc<RefCell<HashMap<usize, ChangeHandler<T>>>>,
     parent_view: View,
     sub_views: Rc<RefCell<HashMap<usize, CacaoComponent>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
@@ -47,7 +50,7 @@ impl ViewDelegate for &dyn Renderable {
 impl<T, D> ViewDelegate for ComponentWrapper<T, D>
 where
     T: Component + Clone + PartialEq + 'static,
-    D: Dispatcher<usize> + AppDelegate + 'static,
+    D: Dispatcher<Message> + AppDelegate + 'static,
 {
     const NAME: &'static str = "custom_component";
     fn did_load(&mut self, view: cacao::view::View) {
@@ -60,7 +63,7 @@ where
 impl<T, D> ComponentWrapper<T, D>
 where
     T: Component + PartialEq + Clone + 'static,
-    D: Dispatcher<usize> + AppDelegate + 'static,
+    D: Dispatcher<Message> + AppDelegate + 'static,
 {
     pub fn new(props: T::Props) -> Self {
         Self {
@@ -68,7 +71,8 @@ where
             sub_views: Rc::default(),
             props: Rc::new(RefCell::new(props)),
             state: Rc::default(),
-            handlers: Rc::default(),
+            click_handlers: Rc::default(),
+            change_handlers: Default::default(),
             vdom: Rc::default(),
             component: PhantomData,
             app: PhantomData,
@@ -76,24 +80,24 @@ where
     }
 
     /// Call this to let your component register button clicks
-    pub fn on_message(&self, id: &usize) {
-        if let Some(handler) = self.handlers.borrow_mut().get_mut(id) {
+    pub fn on_message(&self, message: &Message) {
+        if let Some(handler) = self.click_handlers.borrow_mut().get_mut(&message.id) {
             handler(&*self.props.borrow(), &mut *self.state.borrow_mut());
         }
         // We need this check in a separate block to ensure the borrow of handler is dropped
-        if self.has_handler_for(id) {
+        if self.has_handler_for(&message.id) {
             self.render()
         } else {
             for (_, comp) in self.vdom.borrow().iter() {
                 if let VNode::Custom(comp) = comp {
-                    comp.renderable.on_message(id)
+                    comp.renderable.on_message(message)
                 }
             }
         }
     }
 
     fn has_handler_for(&self, id: &usize) -> bool {
-        self.handlers.borrow().contains_key(id)
+        self.click_handlers.borrow().contains_key(id)
     }
     pub fn update_props(&self, props: T::Props) {
         *self.props.borrow_mut() = props;
@@ -119,8 +123,8 @@ where
                 let mut btn = Button::new(button.text.as_ref());
                 if let Some(handler) = button.click {
                     let id = gen_id();
-                    self.handlers.borrow_mut().insert(id, handler);
-                    btn.set_action(move |_| App::<D, usize>::dispatch_main(id));
+                    self.click_handlers.borrow_mut().insert(id, handler);
+                    btn.set_action(move |_| App::<D, Message>::dispatch_main(Message::click(id)));
                 }
                 CacaoComponent::Button(btn)
             }
@@ -230,7 +234,7 @@ impl VComponent {
     pub fn new<T, D>(props: T::Props) -> Self
     where
         T: Component + Clone + PartialEq + 'static,
-        D: AppDelegate + Dispatcher<usize> + 'static,
+        D: AppDelegate + Dispatcher<Message> + 'static,
     {
         Self {
             type_id: TypeId::of::<T>(),
@@ -255,26 +259,30 @@ impl PartialEq for VComponent {
 }
 
 type ClickHandler<T> = fn(&<T as Component>::Props, &mut <T as Component>::State);
+type ChangeHandler<T> = fn(&str, &<T as Component>::Props, &mut <T as Component>::State);
 
 pub trait Renderable {
     fn copy(&self) -> Box<dyn Renderable>;
     fn as_any(&self) -> &dyn Any;
     fn equal_to(&self, other: &dyn Renderable) -> bool;
     fn same_component_as(&self, other: &dyn Renderable) -> bool;
-    fn update_props_from(&self, other: &dyn Renderable);
+    fn update_props_from(&self, other: Box<dyn Renderable>);
     fn render(&self);
     fn get_parent_view(&self) -> &View;
-    fn on_message(&self, id: &usize);
+    fn on_message(&self, message: &Message);
 }
 
-impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usize> + 'static>
-    Renderable for ComponentWrapper<T, D>
+impl<
+        T: Component + PartialEq + Clone + 'static,
+        D: AppDelegate + Dispatcher<Message> + 'static,
+    > Renderable for ComponentWrapper<T, D>
 {
     fn copy(&self) -> Box<dyn Renderable> {
         let wrapper: ComponentWrapper<T, D> = ComponentWrapper {
             props: Rc::clone(&self.props),
             state: Rc::clone(&self.state),
-            handlers: Rc::clone(&self.handlers),
+            click_handlers: Rc::clone(&self.click_handlers),
+            change_handlers: Rc::clone(&self.change_handlers),
             vdom: Rc::clone(&self.vdom),
             sub_views: Rc::clone(&self.sub_views),
             parent_view: self.parent_view.clone_as_handle(),
@@ -297,7 +305,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
     fn same_component_as(&self, other: &dyn Renderable) -> bool {
         other.as_any().is::<Self>()
     }
-    fn update_props_from(&self, other: &dyn Renderable) {
+    fn update_props_from(&self, other: Box<dyn Renderable>) {
         self.update_props(
             other
                 .as_any()
@@ -367,11 +375,10 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
                     node.as_button_mut().unwrap().click = handler;
                     if let Some(handler) = handler {
                         let id = gen_id();
-                        self.handlers.borrow_mut().insert(id, handler);
-                        button
-                            .as_button_mut()
-                            .unwrap()
-                            .set_action(move |_| App::<D, usize>::dispatch_main(id));
+                        self.click_handlers.borrow_mut().insert(id, handler);
+                        button.as_button_mut().unwrap().set_action(move |_| {
+                            App::<D, Message>::dispatch_main(Message::click(id))
+                        });
                     } else {
                         button.as_button_mut().unwrap().set_action(|_| {});
                     }
@@ -382,7 +389,7 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
                         .unwrap()
                         .renderable
                         .as_ref()
-                        .update_props_from(component.renderable.as_ref());
+                        .update_props_from(component.renderable);
                 }
             }
         }
@@ -409,8 +416,8 @@ impl<T: Component + PartialEq + Clone + 'static, D: AppDelegate + Dispatcher<usi
     fn get_parent_view(&self) -> &View {
         &self.parent_view
     }
-    fn on_message(&self, id: &usize) {
-        self.on_message(id)
+    fn on_message(&self, message: &Message) {
+        self.on_message(message)
     }
 }
 
@@ -490,4 +497,50 @@ pub enum VDomDiff<T: Component> {
     UpdatePropsFrom(VComponent),
     InsertNode(VNode<T>),
     ReplaceWith(VNode<T>),
+}
+
+pub struct TextInput<App: AppDelegate> {
+    id: usize,
+    app: PhantomData<App>,
+}
+
+impl<App: AppDelegate> TextInput<App> {
+    pub fn new(id: usize) -> Self {
+        Self {
+            id,
+            app: PhantomData,
+        }
+    }
+}
+
+impl<D: AppDelegate + Dispatcher<Message>> TextFieldDelegate for TextInput<D> {
+    const NAME: &'static str = "TextInput";
+    fn text_did_change(&self, value: &str) {
+        App::<D, Message>::dispatch_main(Message::change(self.id, value.to_owned()));
+    }
+}
+
+pub struct Message {
+    pub id: usize,
+    pub payload: Payload,
+}
+
+pub enum Payload {
+    Click,
+    Change(String),
+}
+
+impl Message {
+    fn click(id: usize) -> Self {
+        Self {
+            id,
+            payload: Payload::Click,
+        }
+    }
+    fn change(id: usize, value: String) -> Self {
+        Self {
+            id,
+            payload: Payload::Change(value),
+        }
+    }
 }
