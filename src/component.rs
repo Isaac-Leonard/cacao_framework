@@ -628,11 +628,13 @@ impl<D: AppDelegate + Dispatcher<Message>> TextFieldDelegate for TextInput<D> {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub struct Message {
     pub id: usize,
     pub payload: Payload,
 }
 
+#[derive(Clone, PartialEq)]
 pub enum Payload {
     Click,
     Change(String),
