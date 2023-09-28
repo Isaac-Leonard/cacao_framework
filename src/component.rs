@@ -10,7 +10,7 @@ use std::{
 use cacao::{
     appkit::{App, AppDelegate},
     button::Button,
-    input::TextFieldDelegate,
+    input::{TextField, TextFieldDelegate},
     layout::{Layout, LayoutConstraint},
     notification_center::Dispatcher,
     text::Label,
@@ -26,7 +26,7 @@ pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Mess
     click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     change_handlers: Rc<RefCell<HashMap<usize, ChangeHandler<T>>>>,
     parent_view: View,
-    sub_views: Rc<RefCell<HashMap<usize, CacaoComponent>>>,
+    sub_views: Rc<RefCell<HashMap<usize, CacaoComponent<D>>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
@@ -81,6 +81,8 @@ where
 
     /// Call this to let your component register button clicks
     pub fn on_message(&self, message: &Message) {
+        match &message.payload {
+            Payload::Click => {
         if let Some(handler) = self.click_handlers.borrow_mut().get_mut(&message.id) {
             handler(&*self.props.borrow(), &mut *self.state.borrow_mut());
         }
@@ -95,16 +97,38 @@ where
             }
         }
     }
+            Payload::Change(value) => {
+                if let Some(handler) = self.change_handlers.borrow_mut().get_mut(&message.id) {
+                    handler(
+                        value.as_str(),
+                        &*self.props.borrow(),
+                        &mut *self.state.borrow_mut(),
+                    );
+                }
+                // We need this check in a separate block to ensure the borrow of handler is dropped
+                if self.has_handler_for(&message.id) {
+                    self.render()
+                } else {
+                    for (_, comp) in self.vdom.borrow().iter() {
+                        if let VNode::Custom(comp) = comp {
+                            comp.renderable.on_message(message)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn has_handler_for(&self, id: &usize) -> bool {
         self.click_handlers.borrow().contains_key(id)
+            || self.change_handlers.borrow().contains_key(id)
     }
     pub fn update_props(&self, props: T::Props) {
         *self.props.borrow_mut() = props;
         self.render();
     }
 
-    fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent {
+    fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<D> {
         match vnode {
             VNode::Custom(component) => {
                 let view = View::new();
@@ -127,6 +151,14 @@ where
                     btn.set_action(move |_| App::<D, Message>::dispatch_main(Message::click(id)));
                 }
                 CacaoComponent::Button(btn)
+            }
+            VNode::TextInput(text_input) => {
+                let id = gen_id();
+                let input = TextField::with(TextInput::new(id));
+                if let Some(handler) = text_input.change {
+                    self.change_handlers.borrow_mut().insert(id, handler);
+                };
+                CacaoComponent::TextField(input)
             }
         }
     }
@@ -169,6 +201,7 @@ where
 pub enum VNode<T: Component + ?Sized> {
     Label(VLabel),
     Button(VButton<T>),
+    TextInput(VTextInput<T>),
     Custom(VComponent),
 }
 
@@ -212,6 +245,22 @@ impl<T: Component + ?Sized> VNode<T> {
             None
         }
     }
+
+    pub fn as_text_input(&self) -> Option<&VTextInput<T>> {
+        if let Self::TextInput(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_text_input_mut(&mut self) -> Option<&mut VTextInput<T>> {
+        if let Self::TextInput(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -223,6 +272,11 @@ pub struct VLabel {
 pub struct VButton<T: Component + ?Sized> {
     pub click: Option<ClickHandler<T>>,
     pub text: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct VTextInput<T: Component + ?Sized> {
+    change: Option<ChangeHandler<T>>,
 }
 
 pub struct VComponent {
@@ -383,6 +437,22 @@ impl<
                         button.as_button_mut().unwrap().set_action(|_| {});
                     }
                 }
+                VDomDiff::UpdateInputChange(handler) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    let input = sub_views.get_mut(&key).unwrap();
+                    node.as_text_input_mut().unwrap().change = handler;
+                    let id = gen_id();
+                    input
+                        .as_text_field_mut()
+                        .unwrap()
+                        .delegate
+                        .as_mut()
+                        .unwrap()
+                        .id = id;
+                    if let Some(handler) = handler {
+                        self.change_handlers.borrow_mut().insert(id, handler);
+                    }
+                }
                 VDomDiff::UpdatePropsFrom(component) => {
                     let node = vdom.get_mut(&key).unwrap();
                     node.as_custom()
@@ -421,13 +491,14 @@ impl<
     }
 }
 
-pub enum CacaoComponent {
+pub enum CacaoComponent<D: AppDelegate + Dispatcher<Message>> {
     Label(Label),
     Button(Button),
     View(View),
+    TextField(TextField<TextInput<D>>),
 }
 
-impl CacaoComponent {
+impl<D: AppDelegate + Dispatcher<Message>> CacaoComponent<D> {
     pub fn as_label(&self) -> Option<&Label> {
         if let Self::Label(v) = self {
             Some(v)
@@ -481,6 +552,23 @@ impl CacaoComponent {
             CacaoComponent::Label(label) => label,
             CacaoComponent::Button(button) => button,
             CacaoComponent::View(view) => view,
+            CacaoComponent::TextField(text_input) => text_input,
+        }
+    }
+
+    pub fn as_text_field(&self) -> Option<&TextField<TextInput<D>>> {
+        if let Self::TextField(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_text_field_mut(&mut self) -> Option<&mut TextField<TextInput<D>>> {
+        if let Self::TextField(v) = self {
+            Some(v)
+        } else {
+            None
         }
     }
 }
@@ -494,6 +582,7 @@ pub enum VDomDiff<T: Component> {
     UpdateLabelText(String),
     UpdateButtonText(String),
     UpdateButtonClick(Option<ClickHandler<T>>),
+    UpdateInputChange(Option<ChangeHandler<T>>),
     UpdatePropsFrom(VComponent),
     InsertNode(VNode<T>),
     ReplaceWith(VNode<T>),
