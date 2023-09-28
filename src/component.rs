@@ -12,12 +12,13 @@ use cacao::{
     button::Button,
     input::{TextField, TextFieldDelegate},
     layout::{Layout, LayoutConstraint},
+    listview::ListView,
     notification_center::Dispatcher,
     text::Label,
     view::{View, ViewDelegate},
 };
 
-use crate::layout::top_to_bottom;
+use crate::{layout::top_to_bottom, list_view::MyListView};
 
 pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Message> + AppDelegate>
 {
@@ -26,7 +27,7 @@ pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Mess
     click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     change_handlers: Rc<RefCell<HashMap<usize, ChangeHandler<T>>>>,
     parent_view: View,
-    sub_views: Rc<RefCell<HashMap<usize, CacaoComponent<D>>>>,
+    sub_views: Rc<RefCell<HashMap<usize, CacaoComponent<T, D>>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
     component: PhantomData<T>,
     app: PhantomData<D>,
@@ -128,7 +129,7 @@ where
         self.render();
     }
 
-    pub fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<D> {
+    pub fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<T, D> {
         match vnode {
             VNode::Custom(component) => {
                 let view = View::new();
@@ -159,6 +160,15 @@ where
                     self.change_handlers.borrow_mut().insert(id, handler);
                 };
                 CacaoComponent::TextField(input)
+            }
+            VNode::List(list) => {
+                let list = MyListView::<T, D>::with(
+                    list.count,
+                    list.render,
+                    self.props.clone(),
+                    self.state.clone(),
+                );
+                CacaoComponent::List(list)
             }
         }
     }
@@ -202,6 +212,7 @@ pub enum VNode<T: Component + ?Sized> {
     Label(VLabel),
     Button(VButton<T>),
     TextInput(VTextInput<T>),
+    List(VList<T>),
     Custom(VComponent),
 }
 
@@ -277,6 +288,12 @@ pub struct VButton<T: Component + ?Sized> {
 #[derive(Clone, PartialEq)]
 pub struct VTextInput<T: Component + ?Sized> {
     change: Option<ChangeHandler<T>>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct VList<T: Component + ?Sized> {
+    pub count: usize,
+    pub render: fn(index: usize, &T::Props, &T::State) -> Vec<VNode<T>>,
 }
 
 pub struct VComponent {
@@ -491,14 +508,15 @@ impl<
     }
 }
 
-pub enum CacaoComponent<D: AppDelegate + Dispatcher<Message>> {
+pub enum CacaoComponent<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> {
     Label(Label),
     Button(Button),
     View(View),
     TextField(TextField<TextInput<D>>),
+    List(ListView<MyListView<T, D>>),
 }
 
-impl<D: AppDelegate + Dispatcher<Message>> CacaoComponent<D> {
+impl<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> CacaoComponent<T, D> {
     pub fn as_label(&self) -> Option<&Label> {
         if let Self::Label(v) = self {
             Some(v)
@@ -553,6 +571,7 @@ impl<D: AppDelegate + Dispatcher<Message>> CacaoComponent<D> {
             CacaoComponent::Button(button) => button,
             CacaoComponent::View(view) => view,
             CacaoComponent::TextField(text_input) => text_input,
+            CacaoComponent::List(list) => list,
         }
     }
 
