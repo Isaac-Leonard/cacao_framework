@@ -128,7 +128,7 @@ where
         self.render();
     }
 
-    fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<D> {
+    pub fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<D> {
         match vnode {
             VNode::Custom(component) => {
                 let view = View::new();
@@ -547,7 +547,7 @@ impl<D: AppDelegate + Dispatcher<Message>> CacaoComponent<D> {
         }
     }
 
-    fn as_layout(&self) -> &dyn Layout {
+    pub fn as_layout(&self) -> &dyn Layout {
         match self {
             CacaoComponent::Label(label) => label,
             CacaoComponent::Button(button) => button,
