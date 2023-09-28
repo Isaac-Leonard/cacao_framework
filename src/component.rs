@@ -84,20 +84,20 @@ where
     pub fn on_message(&self, message: &Message) {
         match &message.payload {
             Payload::Click => {
-        if let Some(handler) = self.click_handlers.borrow_mut().get_mut(&message.id) {
-            handler(&*self.props.borrow(), &mut *self.state.borrow_mut());
-        }
-        // We need this check in a separate block to ensure the borrow of handler is dropped
-        if self.has_handler_for(&message.id) {
-            self.render()
-        } else {
-            for (_, comp) in self.vdom.borrow().iter() {
-                if let VNode::Custom(comp) = comp {
-                    comp.renderable.on_message(message)
+                if let Some(handler) = self.click_handlers.borrow_mut().get_mut(&message.id) {
+                    handler(&*self.props.borrow(), &mut *self.state.borrow_mut());
+                }
+                // We need this check in a separate block to ensure the borrow of handler is dropped
+                if self.has_handler_for(&message.id) {
+                    self.render()
+                } else {
+                    for (_, comp) in self.vdom.borrow().iter() {
+                        if let VNode::Custom(comp) = comp {
+                            comp.renderable.on_message(message)
+                        }
+                    }
                 }
             }
-        }
-    }
             Payload::Change(value) => {
                 if let Some(handler) = self.change_handlers.borrow_mut().get_mut(&message.id) {
                     handler(

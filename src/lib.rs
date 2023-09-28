@@ -18,16 +18,16 @@ mod tests {
             vec![
                 (
                     0,
-                VNode::Button(VButton {
-                    click: Some(|_, state| *state += 1),
-                    text: "Increment".to_string(),
-                }),
+                    VNode::Button(VButton {
+                        click: Some(|_, state| *state += 1),
+                        text: "Increment".to_string(),
+                    }),
                 ),
                 (
                     0,
-                VNode::Label(VLabel {
-                    text: state.to_string(),
-                }),
+                    VNode::Label(VLabel {
+                        text: state.to_string(),
+                    }),
                 ),
             ]
         }
