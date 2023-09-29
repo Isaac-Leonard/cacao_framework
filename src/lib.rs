@@ -1,3 +1,4 @@
+#![feature(associated_type_defaults)]
 mod component;
 mod layout;
 mod list_view;

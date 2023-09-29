@@ -20,8 +20,7 @@ use cacao::{
 
 use crate::{layout::top_to_bottom, list_view::MyListView};
 
-pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Message> + AppDelegate>
-{
+pub struct ComponentWrapper<T: Component + PartialEq, D: Dispatcher<Message> + AppDelegate> {
     props: Rc<RefCell<T::Props>>,
     state: Rc<RefCell<T::State>>,
     click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
@@ -36,8 +35,11 @@ pub struct ComponentWrapper<T: Component + Clone + PartialEq, D: Dispatcher<Mess
 pub trait Component {
     type Props: Clone + PartialEq;
     type State: Clone + PartialEq + Default;
-
+    type Message: Clone + PartialEq = ();
     fn render(props: &Self::Props, state: &Self::State) -> Vec<(usize, VNode<Self>)>;
+    fn on_message(_msg: &Self::Message, _props: &Self::Props, _state: &mut Self::State) -> bool {
+        false
+    }
 }
 
 impl ViewDelegate for &dyn Renderable {
@@ -115,6 +117,20 @@ where
                             comp.renderable.on_message(message)
                         }
                     }
+                }
+            }
+            Payload::Custom(message) => {
+                let rerender = if let Some(message) = message.downcast_ref::<T::Message>() {
+                    T::on_message(
+                        message,
+                        &*self.props.borrow(),
+                        &mut *self.state.borrow_mut(),
+                    )
+                } else {
+                    false
+                };
+                if rerender {
+                    self.render()
                 }
             }
         }
@@ -207,7 +223,7 @@ where
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub enum VNode<T: Component + ?Sized> {
     Label(VLabel),
     Button(VButton<T>),
@@ -310,15 +326,6 @@ impl VComponent {
         Self {
             type_id: TypeId::of::<T>(),
             renderable: Box::new(ComponentWrapper::<T, D>::new(props)),
-        }
-    }
-}
-
-impl Clone for VComponent {
-    fn clone(&self) -> Self {
-        Self {
-            type_id: self.type_id,
-            renderable: self.renderable.copy(),
         }
     }
 }
@@ -508,7 +515,7 @@ impl<
     }
 }
 
-pub enum CacaoComponent<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> {
+pub enum CacaoComponent<T: Component + PartialEq, D: AppDelegate + Dispatcher<Message>> {
     Label(Label),
     Button(Button),
     View(View),
@@ -628,16 +635,16 @@ impl<D: AppDelegate + Dispatcher<Message>> TextFieldDelegate for TextInput<D> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub struct Message {
     pub id: usize,
     pub payload: Payload,
 }
 
-#[derive(Clone, PartialEq)]
 pub enum Payload {
     Click,
     Change(String),
+    Custom(Box<dyn Any + Send + Sync>),
 }
 
 impl Message {
@@ -651,6 +658,18 @@ impl Message {
         Self {
             id,
             payload: Payload::Change(value),
+        }
+    }
+}
+
+/// Take note that this will flatly return false for custom types
+impl PartialEq for Payload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Click, Self::Click) => true,
+            (Self::Change(a), Self::Change(b)) => a == b,
+            (Self::Custom(_), Self::Custom(_)) => false,
+            _ => false,
         }
     }
 }
