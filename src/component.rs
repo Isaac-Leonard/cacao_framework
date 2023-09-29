@@ -660,6 +660,14 @@ impl Message {
             payload: Payload::Change(value),
         }
     }
+
+    pub fn custom(message: impl Any + Send + Sync) -> Self {
+        Self {
+            // This is a bit silly but for now it needs an id and we don't want one that  will conflict with something else
+            id: gen_id(),
+            payload: Payload::Custom(Box::new(message)),
+        }
+    }
 }
 
 /// Take note that this will flatly return false for custom types
