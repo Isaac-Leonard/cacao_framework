@@ -121,12 +121,14 @@ where
             }
             Payload::Custom(message) => {
                 let rerender = if let Some(message) = message.downcast_ref::<T::Message>() {
+                    eprintln!("Successfully downcast message");
                     T::on_message(
                         message,
                         &*self.props.borrow(),
                         &mut *self.state.borrow_mut(),
                     )
                 } else {
+                    eprintln!("Unsuccessfully downcast message");
                     false
                 };
                 if rerender {
@@ -635,12 +637,13 @@ impl<D: AppDelegate + Dispatcher<Message>> TextFieldDelegate for TextInput<D> {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct Message {
     pub id: usize,
     pub payload: Payload,
 }
 
+#[derive(Debug)]
 pub enum Payload {
     Click,
     Change(String),
