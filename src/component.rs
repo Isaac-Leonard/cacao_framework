@@ -178,6 +178,7 @@ where
             VNode::TextInput(text_input) => {
                 let id = gen_id();
                 let input = TextField::with(TextInput::new(id));
+                input.set_placeholder_text(&text_input.initial_value);
                 if let Some(handler) = text_input.change {
                     self.change_handlers.borrow_mut().insert(id, handler);
                 };
@@ -310,6 +311,7 @@ pub struct VButton<T: Component + ?Sized> {
 #[derive(Clone, PartialEq)]
 pub struct VTextInput<T: Component + ?Sized> {
     change: Option<ChangeHandler<T>>,
+    initial_value: String,
 }
 
 #[derive(Clone, PartialEq)]
