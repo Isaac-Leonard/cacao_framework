@@ -127,14 +127,14 @@ where
                 }
                 let rerender =
                     if let Some(message) = inner_message.as_ref().downcast_ref::<T::Message>() {
-                    T::on_message(
-                        message,
-                        &*self.props.borrow(),
-                        &mut *self.state.borrow_mut(),
-                    )
-                } else {
-                    false
-                };
+                        T::on_message(
+                            message,
+                            &*self.props.borrow(),
+                            &mut *self.state.borrow_mut(),
+                        )
+                    } else {
+                        false
+                    };
                 if rerender {
                     self.render()
                 }
