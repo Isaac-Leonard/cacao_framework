@@ -310,8 +310,8 @@ pub struct VButton<T: Component + ?Sized> {
 
 #[derive(Clone, PartialEq)]
 pub struct VTextInput<T: Component + ?Sized> {
-    change: Option<ChangeHandler<T>>,
-    initial_value: String,
+    pub change: Option<ChangeHandler<T>>,
+    pub initial_value: String,
 }
 
 #[derive(Clone, PartialEq)]
