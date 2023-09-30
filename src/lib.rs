@@ -1,3 +1,4 @@
+#![feature(array_windows)]
 #![feature(associated_type_defaults)]
 mod component;
 mod layout;

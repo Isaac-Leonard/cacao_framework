@@ -21,16 +21,18 @@ pub fn top_to_bottom(
         // No views were passed
         return Vec::new();
     };
-    let adjoining_constraints = views.windows(2).map(|views| {
-        views[0]
-            .get_bottom()
-            .constraint_equal_to(&views[1].get_top())
-    });
+    let adjoining_constraints = views
+        .array_windows::<2>()
+        .map(|[a, b]| a.get_bottom().constraint_equal_to(&b.get_top()));
     let side_constraints = views.iter().flat_map(|view| {
-        [view
-            .get_leading()
+        [
+            view.get_leading()
             .constraint_equal_to(&parent.get_leading())
-            .offset(padding)]
+                .offset(padding),
+            view.get_trailing()
+                .constraint_equal_to(&parent.get_trailing())
+                .offset(padding),
+        ]
     });
     vec![top, bottom]
         .into_iter()
