@@ -119,16 +119,20 @@ where
                     }
                 }
             }
-            Payload::Custom(message) => {
-                let rerender = if let Some(message) = message.downcast_ref::<T::Message>() {
-                    eprintln!("Successfully downcast message");
+            Payload::Custom(inner_message) => {
+                for (_, comp) in self.vdom.borrow().iter() {
+                    if let VNode::Custom(comp) = comp {
+                        comp.renderable.on_message(message)
+                    }
+                }
+                let rerender =
+                    if let Some(message) = inner_message.as_ref().downcast_ref::<T::Message>() {
                     T::on_message(
                         message,
                         &*self.props.borrow(),
                         &mut *self.state.borrow_mut(),
                     )
                 } else {
-                    eprintln!("Unsuccessfully downcast message");
                     false
                 };
                 if rerender {
