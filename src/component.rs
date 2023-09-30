@@ -101,15 +101,18 @@ where
                 }
             }
             Payload::Change(value) => {
+                let rerender =
                 if let Some(handler) = self.change_handlers.borrow_mut().get_mut(&message.id) {
                     handler(
                         value.as_str(),
                         &*self.props.borrow(),
                         &mut *self.state.borrow_mut(),
-                    );
-                }
+                        )
+                    } else {
+                        false
+                    };
                 // We need this check in a separate block to ensure the borrow of handler is dropped
-                if self.has_handler_for(&message.id) {
+                if rerender {
                     self.render()
                 } else {
                     for (_, comp) in self.vdom.borrow().iter() {
@@ -178,6 +181,7 @@ where
             VNode::TextInput(text_input) => {
                 let id = gen_id();
                 let input = TextField::with(TextInput::new(id));
+                input.set_text(&text_input.initial_value);
                 if let Some(handler) = text_input.change {
                     self.change_handlers.borrow_mut().insert(id, handler);
                 };
@@ -344,7 +348,7 @@ impl PartialEq for VComponent {
 }
 
 type ClickHandler<T> = fn(&<T as Component>::Props, &mut <T as Component>::State);
-type ChangeHandler<T> = fn(&str, &<T as Component>::Props, &mut <T as Component>::State);
+type ChangeHandler<T> = fn(&str, &<T as Component>::Props, &mut <T as Component>::State) -> bool;
 
 pub trait Renderable {
     fn copy(&self) -> Box<dyn Renderable>;
