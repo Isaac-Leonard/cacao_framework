@@ -169,6 +169,11 @@ where
                 label.set_text(&data.text);
                 CacaoComponent::Label(label)
             }
+            VNode::Text(text) => {
+                let label = Label::new();
+                label.set_text(text);
+                CacaoComponent::Label(label)
+            }
             VNode::Button(button) => {
                 let mut btn = Button::new(button.text.as_ref());
                 if let Some(handler) = button.click {
@@ -240,6 +245,7 @@ pub enum VNode<T: Component + ?Sized> {
     Button(VButton<T>),
     TextInput(VTextInput<T>),
     List(VList<T>),
+    Text(&'static str),
     Custom(VComponent),
 }
 
