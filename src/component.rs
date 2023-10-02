@@ -1,5 +1,5 @@
 use std::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
@@ -102,11 +102,11 @@ where
             }
             Payload::Change(value) => {
                 let rerender =
-                if let Some(handler) = self.change_handlers.borrow_mut().get_mut(&message.id) {
-                    handler(
-                        value.as_str(),
-                        &*self.props.borrow(),
-                        &mut *self.state.borrow_mut(),
+                    if let Some(handler) = self.change_handlers.borrow_mut().get_mut(&message.id) {
+                        handler(
+                            value.as_str(),
+                            &*self.props.borrow(),
+                            &mut *self.state.borrow_mut(),
                         )
                     } else {
                         false
@@ -188,6 +188,7 @@ where
                 CacaoComponent::TextField(input)
             }
             VNode::List(list) => {
+                eprintln!("processing VList of {}", type_name::<T>());
                 let list = MyListView::<T, D>::with(
                     list.count,
                     list.render,

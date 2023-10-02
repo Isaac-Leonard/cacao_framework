@@ -27,7 +27,7 @@ pub fn top_to_bottom(
     let side_constraints = views.iter().flat_map(|view| {
         [
             view.get_leading()
-            .constraint_equal_to(&parent.get_leading())
+                .constraint_equal_to(&parent.get_leading())
                 .offset(padding),
             view.get_trailing()
                 .constraint_equal_to(&parent.get_trailing())

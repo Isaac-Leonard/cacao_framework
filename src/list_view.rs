@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use cacao::appkit::AppDelegate;
 use cacao::layout::{Layout, LayoutConstraint};
-use cacao::listview::{ListView, ListViewDelegate, ListViewRow};
+use cacao::listview::{ListView, ListViewDelegate};
 use cacao::notification_center::Dispatcher;
 use cacao::view::{View, ViewDelegate};
 
@@ -19,6 +19,7 @@ pub struct MyListView<T: Component, D: Dispatcher<Message> + AppDelegate> {
     props: Rc<RefCell<T::Props>>,
     state: Rc<RefCell<T::State>>,
     app: PhantomData<D>,
+    component: PhantomData<T>,
 }
 
 impl<T, D> MyListView<T, D>
@@ -39,6 +40,7 @@ where
             props,
             state,
             app: PhantomData,
+            component: PhantomData,
         }
     }
 
@@ -59,18 +61,20 @@ where
     D: Dispatcher<Message> + AppDelegate + 'static,
 {
     const NAME: &'static str = "ThisIsIgnored";
+    fn subclass_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Essential configuration and retaining of a `ListView` handle to do updates later on.
     fn did_load(&mut self, view: ListView) {
         view.register(std::any::type_name::<T>(), Row::<T, D>::new);
         view.set_row_height(64.);
         LayoutConstraint::activate(&[
-            view.height.constraint_equal_to_constant(50.0),
-            view.width.constraint_equal_to_constant(50.0),
+            view.height.constraint_equal_to_constant(100.0),
+            view.width.constraint_equal_to_constant(100.0),
         ]);
         self.view = Some(view);
     }
 
-    /// The number of attributes we have.
     fn number_of_items(&self) -> usize {
         self.count
     }
@@ -78,7 +82,11 @@ where
     /// For a given row, dequeues a view from the system and passes the appropriate `Transfer` for
     /// configuration.
     fn item_for(&self, row: usize) -> cacao::listview::ListViewRow {
-        let mut view = ListViewRow::with(Row::<T, D>::new());
+        let mut view = self
+            .view
+            .as_ref()
+            .unwrap()
+            .dequeue::<Row<T, D>>(std::any::type_name::<T>());
         if let Some(view) = &mut view.delegate {
             view.as_mut().configure_with(
                 self.render,
