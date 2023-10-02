@@ -214,6 +214,13 @@ where
                     Vec::new()
                 }
             }
+            (VNode::Text(a), VNode::Text(b)) => {
+                if *a != b {
+                    vec![VDomDiff::UpdatePureText(b)]
+                } else {
+                    Vec::new()
+                }
+            }
             (VNode::Button(a), VNode::Button(b)) => {
                 let mut changes = Vec::new();
                 if a.text != b.text {
@@ -300,6 +307,22 @@ impl<T: Component + ?Sized> VNode<T> {
 
     pub fn as_text_input_mut(&mut self) -> Option<&mut VTextInput<T>> {
         if let Self::TextInput(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&&'static str> {
+        if let Self::Text(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_text_mut(&mut self) -> Option<&mut &'static str> {
+        if let Self::Text(v) = self {
             Some(v)
         } else {
             None
@@ -458,6 +481,12 @@ impl<
                     let label = sub_views.get_mut(&key).unwrap();
                     label.as_label().unwrap().set_text(&text);
                     node.as_label_mut().unwrap().text = text;
+                }
+                VDomDiff::UpdatePureText(text) => {
+                    let node = vdom.get_mut(&key).unwrap();
+                    let label = sub_views.get_mut(&key).unwrap();
+                    label.as_label().unwrap().set_text(text);
+                    *node.as_text_mut().unwrap() = text;
                 }
                 VDomDiff::UpdateButtonText(text) => {
                     let node = vdom.get_mut(&key).unwrap();
@@ -623,6 +652,7 @@ fn gen_id() -> usize {
 }
 
 pub enum VDomDiff<T: Component> {
+    UpdatePureText(&'static str),
     UpdateLabelText(String),
     UpdateButtonText(String),
     UpdateButtonClick(Option<ClickHandler<T>>),
