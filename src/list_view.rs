@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use cacao::appkit::AppDelegate;
 use cacao::layout::{Layout, LayoutConstraint};
-use cacao::listview::{ListView, ListViewDelegate};
+use cacao::listview::{ListView, ListViewDelegate, ListViewRow};
 use cacao::notification_center::Dispatcher;
 use cacao::view::{View, ViewDelegate};
 
@@ -78,12 +78,7 @@ where
     /// For a given row, dequeues a view from the system and passes the appropriate `Transfer` for
     /// configuration.
     fn item_for(&self, row: usize) -> cacao::listview::ListViewRow {
-        let mut view = self
-            .view
-            .as_ref()
-            .unwrap()
-            .dequeue::<Row<T, D>>(std::any::type_name::<T>());
-
+        let mut view = ListViewRow::with(Row::<T, D>::new());
         if let Some(view) = &mut view.delegate {
             view.as_mut().configure_with(
                 self.render,
