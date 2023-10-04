@@ -209,6 +209,9 @@ where
             }
             VNode::Select(select) => {
                 let mut select_view = Select::new();
+                for option in &select.options {
+                    select_view.add_item(option)
+                }
                 if let Some(handler) = select.select {
                     let id = gen_id();
                     self.select_handlers.borrow_mut().insert(id, handler);
