@@ -408,8 +408,8 @@ pub struct VList<T: Component + ?Sized> {
 
 #[derive(PartialEq, Clone)]
 pub struct VSelect<T: Component + ?Sized> {
-    options: Vec<String>,
-    select: Option<SelectHandler<T>>,
+    pub options: Vec<String>,
+    pub select: Option<SelectHandler<T>>,
 }
 
 pub struct VComponent {
