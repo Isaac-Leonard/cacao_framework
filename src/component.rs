@@ -10,10 +10,13 @@ use std::{
 use cacao::{
     appkit::{App, AppDelegate},
     button::Button,
+    foundation::NSInteger,
     input::{TextField, TextFieldDelegate},
     layout::{Layout, LayoutConstraint},
     listview::ListView,
     notification_center::Dispatcher,
+    objc::msg_send,
+    select::Select,
     text::Label,
     view::{View, ViewDelegate},
 };
@@ -25,6 +28,7 @@ pub struct ComponentWrapper<T: Component + PartialEq, D: Dispatcher<Message> + A
     state: Rc<RefCell<T::State>>,
     click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     change_handlers: Rc<RefCell<HashMap<usize, ChangeHandler<T>>>>,
+    select_handlers: Rc<RefCell<HashMap<usize, SelectHandler<T>>>>,
     parent_view: View,
     sub_views: Rc<RefCell<HashMap<usize, CacaoComponent<T, D>>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
@@ -47,6 +51,7 @@ impl ViewDelegate for &dyn Renderable {
     fn did_load(&mut self, view: cacao::view::View) {
         self.render();
         view.add_subview(self.get_parent_view());
+        LayoutConstraint::activate(&top_to_bottom(vec![self.get_parent_view()], &view, 8.));
     }
 }
 
@@ -76,6 +81,7 @@ where
             state: Rc::default(),
             click_handlers: Rc::default(),
             change_handlers: Default::default(),
+            select_handlers: Default::default(),
             vdom: Rc::default(),
             component: PhantomData,
             app: PhantomData,
@@ -108,6 +114,24 @@ where
                             &*self.props.borrow(),
                             &mut *self.state.borrow_mut(),
                         )
+                    } else {
+                        false
+                    };
+                // We need this check in a separate block to ensure the borrow of handler is dropped
+                if rerender {
+                    self.render()
+                } else {
+                    for (_, comp) in self.vdom.borrow().iter() {
+                        if let VNode::Custom(comp) = comp {
+                            comp.renderable.on_message(message)
+                        }
+                    }
+                }
+            }
+            Payload::Select(value) => {
+                let rerender =
+                    if let Some(handler) = self.select_handlers.borrow_mut().get_mut(&message.id) {
+                        handler(*value, &*self.props.borrow(), &mut *self.state.borrow_mut())
                     } else {
                         false
                     };
@@ -183,6 +207,18 @@ where
                 }
                 CacaoComponent::Button(btn)
             }
+            VNode::Select(select) => {
+                let mut select_view = Select::new();
+                if let Some(handler) = select.select {
+                    let id = gen_id();
+                    self.select_handlers.borrow_mut().insert(id, handler);
+                    select_view.set_action(move |sender| {
+                        let index: NSInteger = unsafe { msg_send![sender, indexOfSelectedItem] };
+                        App::<D, Message>::dispatch_main(Message::select(id, index as usize))
+                    });
+                }
+                CacaoComponent::Select(select_view)
+            }
             VNode::TextInput(text_input) => {
                 let id = gen_id();
                 let input = TextField::with(TextInput::new(id));
@@ -252,6 +288,7 @@ pub enum VNode<T: Component + ?Sized> {
     Button(VButton<T>),
     TextInput(VTextInput<T>),
     List(VList<T>),
+    Select(VSelect<T>),
     Text(&'static str),
     Custom(VComponent),
 }
@@ -328,6 +365,22 @@ impl<T: Component + ?Sized> VNode<T> {
             None
         }
     }
+
+    pub fn as_select(&self) -> Option<&VSelect<T>> {
+        if let Self::Select(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_select_mut(&mut self) -> Option<&mut VSelect<T>> {
+        if let Self::Select(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -351,6 +404,12 @@ pub struct VTextInput<T: Component + ?Sized> {
 pub struct VList<T: Component + ?Sized> {
     pub count: usize,
     pub render: fn(index: usize, &T::Props, &T::State) -> Vec<VNode<T>>,
+}
+
+#[derive(PartialEq, Clone)]
+pub struct VSelect<T: Component + ?Sized> {
+    options: Vec<String>,
+    select: Option<SelectHandler<T>>,
 }
 
 pub struct VComponent {
@@ -379,6 +438,7 @@ impl PartialEq for VComponent {
 
 type ClickHandler<T> = fn(&<T as Component>::Props, &mut <T as Component>::State);
 type ChangeHandler<T> = fn(&str, &<T as Component>::Props, &mut <T as Component>::State) -> bool;
+type SelectHandler<T> = fn(usize, &<T as Component>::Props, &mut <T as Component>::State) -> bool;
 
 pub trait Renderable {
     fn copy(&self) -> Box<dyn Renderable>;
@@ -402,6 +462,7 @@ impl<
             state: Rc::clone(&self.state),
             click_handlers: Rc::clone(&self.click_handlers),
             change_handlers: Rc::clone(&self.change_handlers),
+            select_handlers: Rc::clone(&self.select_handlers),
             vdom: Rc::clone(&self.vdom),
             sub_views: Rc::clone(&self.sub_views),
             parent_view: self.parent_view.clone_as_handle(),
@@ -568,6 +629,7 @@ pub enum CacaoComponent<T: Component + PartialEq, D: AppDelegate + Dispatcher<Me
     View(View),
     TextField(TextField<TextInput<D>>),
     List(ListView<MyListView<T, D>>),
+    Select(Select),
 }
 
 impl<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> CacaoComponent<T, D> {
@@ -626,6 +688,7 @@ impl<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> Cac
             CacaoComponent::View(view) => view,
             CacaoComponent::TextField(text_input) => text_input,
             CacaoComponent::List(list) => list,
+            CacaoComponent::Select(select) => select,
         }
     }
 
@@ -693,6 +756,7 @@ pub struct Message {
 pub enum Payload {
     Click,
     Change(String),
+    Select(usize),
     Custom(Box<dyn Any + Send + Sync>),
 }
 
@@ -707,6 +771,12 @@ impl Message {
         Self {
             id,
             payload: Payload::Change(value),
+        }
+    }
+    fn select(id: usize, value: usize) -> Self {
+        Self {
+            id,
+            payload: Payload::Select(value),
         }
     }
 
