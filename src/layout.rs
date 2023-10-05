@@ -1,4 +1,7 @@
-use cacao::layout::{Layout, LayoutConstraint, SafeAreaLayoutGuide};
+use cacao::{
+    layout::{Layout, LayoutAnchorDimension, LayoutConstraint, SafeAreaLayoutGuide},
+    objc::msg_send_id,
+};
 
 /// Takes a list of views, a parent view that  contains them and returns layout constraints that will position them from top to bottom separated by the specified padding.
 /// The padding is also applied to the sides of each view.
@@ -38,5 +41,19 @@ pub fn top_to_bottom(
         .into_iter()
         .chain(adjoining_constraints)
         .chain(side_constraints)
+        .chain(
+            views
+                .iter()
+                .flat_map(|view| {
+                    let view = &*view.get_backing_obj();
+                    [
+                        LayoutAnchorDimension::Width(unsafe { msg_send_id![view, widthAnchor] })
+                            .constraint_greater_than_or_equal_to_constant(1.),
+                        LayoutAnchorDimension::Height(unsafe { msg_send_id![view, heightAnchor] })
+                            .constraint_greater_than_or_equal_to_constant(1.),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        )
         .collect()
 }

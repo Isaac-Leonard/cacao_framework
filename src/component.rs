@@ -29,7 +29,7 @@ pub struct ComponentWrapper<T: Component + PartialEq, D: Dispatcher<Message> + A
     click_handlers: Rc<RefCell<HashMap<usize, ClickHandler<T>>>>,
     change_handlers: Rc<RefCell<HashMap<usize, ChangeHandler<T>>>>,
     select_handlers: Rc<RefCell<HashMap<usize, SelectHandler<T>>>>,
-    parent_view: View,
+    parent_view: RefCell<View>,
     sub_views: Rc<RefCell<HashMap<usize, CacaoComponent<T, D>>>>,
     vdom: Rc<RefCell<HashMap<usize, VNode<T>>>>,
     component: PhantomData<T>,
@@ -46,11 +46,11 @@ pub trait Component {
     }
 }
 
-impl ViewDelegate for &dyn Renderable {
+impl ViewDelegate for RenderableWrapper {
     const NAME: &'static str = "custom_component";
     fn did_load(&mut self, view: cacao::view::View) {
-        self.render();
-        view.add_subview(self.get_parent_view());
+        self.0.clone().set_parent_view(view);
+        self.0.render()
     }
 }
 
@@ -59,10 +59,13 @@ where
     T: Component + Clone + PartialEq + 'static,
     D: Dispatcher<Message> + AppDelegate + 'static,
 {
-    const NAME: &'static str = "custom_component";
+    const NAME: &'static str = "ignored";
+    fn subclass_name(&self) -> &'static str {
+        type_name::<Self>()
+    }
     fn did_load(&mut self, view: cacao::view::View) {
+        self.parent_view = RefCell::new(view);
         self.render();
-        view.add_subview(self.get_parent_view());
     }
 }
 
@@ -74,7 +77,7 @@ where
 {
     pub fn new(props: T::Props) -> Self {
         Self {
-            parent_view: View::new(),
+            parent_view: RefCell::new(View::new()),
             sub_views: Rc::default(),
             props: Rc::new(RefCell::new(props)),
             state: Rc::default(),
@@ -100,7 +103,7 @@ where
                 } else {
                     for (_, comp) in self.vdom.borrow().iter() {
                         if let VNode::Custom(comp) = comp {
-                            comp.renderable.on_message(message)
+                            comp.renderable.0.on_message(message)
                         }
                     }
                 }
@@ -122,7 +125,7 @@ where
                 } else {
                     for (_, comp) in self.vdom.borrow().iter() {
                         if let VNode::Custom(comp) = comp {
-                            comp.renderable.on_message(message)
+                            comp.renderable.0.on_message(message)
                         }
                     }
                 }
@@ -140,7 +143,7 @@ where
                 } else {
                     for (_, comp) in self.vdom.borrow().iter() {
                         if let VNode::Custom(comp) = comp {
-                            comp.renderable.on_message(message)
+                            comp.renderable.0.on_message(message)
                         }
                     }
                 }
@@ -148,7 +151,7 @@ where
             Payload::Custom(inner_message) => {
                 for (_, comp) in self.vdom.borrow().iter() {
                     if let VNode::Custom(comp) = comp {
-                        comp.renderable.on_message(message)
+                        comp.renderable.0.on_message(message)
                     }
                 }
                 let rerender =
@@ -180,11 +183,7 @@ where
     pub fn create_component(&self, vnode: &mut VNode<T>) -> CacaoComponent<T, D> {
         match vnode {
             VNode::Custom(component) => {
-                let view = View::new();
-                component
-                    .renderable
-                    .as_ref()
-                    .did_load(view.clone_as_handle());
+                let view = View::with(component.renderable.clone());
                 CacaoComponent::View(view)
             }
             VNode::Label(data) => {
@@ -272,7 +271,7 @@ where
             (VNode::Custom(a), VNode::Custom(b)) => {
                 if *a == b {
                     Vec::new()
-                } else if a.renderable.same_component_as(b.renderable.as_ref()) {
+                } else if a.renderable.0.same_component_as(b.renderable.0.as_ref()) {
                     vec![VDomDiff::UpdatePropsFrom(b)]
                 } else {
                     // Both are custom components but different kinds so we must replace it
@@ -416,7 +415,7 @@ pub struct VSelect<T: Component + ?Sized> {
 
 pub struct VComponent {
     pub type_id: TypeId,
-    pub renderable: Box<dyn Renderable>,
+    pub renderable: RenderableWrapper,
 }
 
 impl VComponent {
@@ -427,14 +426,14 @@ impl VComponent {
     {
         Self {
             type_id: TypeId::of::<T>(),
-            renderable: Box::new(ComponentWrapper::<T, D>::new(props)),
+            renderable: RenderableWrapper(Rc::new(ComponentWrapper::<T, D>::new(props))),
         }
     }
 }
 
 impl PartialEq for VComponent {
     fn eq(&self, other: &Self) -> bool {
-        self.type_id == other.type_id && self.renderable.equal_to(other.renderable.as_ref())
+        self.type_id == other.type_id && self.renderable.0.equal_to(other.renderable.0.as_ref())
     }
 }
 
@@ -443,13 +442,13 @@ type ChangeHandler<T> = fn(&str, &<T as Component>::Props, &mut <T as Component>
 type SelectHandler<T> = fn(usize, &<T as Component>::Props, &mut <T as Component>::State) -> bool;
 
 pub trait Renderable {
-    fn copy(&self) -> Box<dyn Renderable>;
+    fn copy(&self) -> Rc<dyn Renderable>;
     fn as_any(&self) -> &dyn Any;
     fn equal_to(&self, other: &dyn Renderable) -> bool;
     fn same_component_as(&self, other: &dyn Renderable) -> bool;
-    fn update_props_from(&self, other: Box<dyn Renderable>);
+    fn update_props_from(&self, other: Rc<dyn Renderable>);
     fn render(&self);
-    fn get_parent_view(&self) -> &View;
+    fn set_parent_view(&self, view: View);
     fn on_message(&self, message: &Message);
 }
 
@@ -458,7 +457,7 @@ impl<
         D: AppDelegate + Dispatcher<Message> + 'static,
     > Renderable for ComponentWrapper<T, D>
 {
-    fn copy(&self) -> Box<dyn Renderable> {
+    fn copy(&self) -> Rc<dyn Renderable> {
         let wrapper: ComponentWrapper<T, D> = ComponentWrapper {
             props: Rc::clone(&self.props),
             state: Rc::clone(&self.state),
@@ -467,11 +466,11 @@ impl<
             select_handlers: Rc::clone(&self.select_handlers),
             vdom: Rc::clone(&self.vdom),
             sub_views: Rc::clone(&self.sub_views),
-            parent_view: self.parent_view.clone_as_handle(),
+            parent_view: RefCell::new(self.parent_view.borrow().clone_as_handle()),
             component: PhantomData,
             app: PhantomData,
         };
-        Box::new(wrapper)
+        Rc::new(wrapper)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -487,7 +486,7 @@ impl<
     fn same_component_as(&self, other: &dyn Renderable) -> bool {
         other.as_any().is::<Self>()
     }
-    fn update_props_from(&self, other: Box<dyn Renderable>) {
+    fn update_props_from(&self, other: Rc<dyn Renderable>) {
         self.update_props(
             other
                 .as_any()
@@ -523,7 +522,7 @@ impl<
             match change {
                 VDomDiff::InsertNode(mut node) => {
                     let view = self.create_component(&mut node);
-                    self.parent_view.add_subview(view.as_layout());
+                    self.parent_view.borrow().add_subview(view.as_layout());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
@@ -535,7 +534,7 @@ impl<
                         .as_layout()
                         .remove_from_superview();
                     let view = self.create_component(&mut node);
-                    self.parent_view.add_subview(view.as_layout());
+                    self.parent_view.borrow().add_subview(view.as_layout());
                     sub_views.insert(key, view);
                     vdom.insert(key, node);
                 }
@@ -592,8 +591,9 @@ impl<
                     node.as_custom()
                         .unwrap()
                         .renderable
+                        .0
                         .as_ref()
-                        .update_props_from(component.renderable);
+                        .update_props_from(component.renderable.0);
                 }
             }
         }
@@ -616,14 +616,15 @@ impl<
             .collect::<Vec<_>>();
         LayoutConstraint::activate(&top_to_bottom(
             views_to_render,
-            &self.parent_view.safe_layout_guide,
+            &self.parent_view.borrow().safe_layout_guide,
             8.,
         ));
     }
 
-    fn get_parent_view(&self) -> &View {
-        &self.parent_view
+    fn set_parent_view(&self, view: View) {
+        *self.parent_view.borrow_mut() = view
     }
+
     fn on_message(&self, message: &Message) {
         self.on_message(message)
     }
@@ -632,7 +633,7 @@ impl<
 pub enum CacaoComponent<T: Component + PartialEq, D: AppDelegate + Dispatcher<Message>> {
     Label(Label),
     Button(Button),
-    View(View),
+    View(View<RenderableWrapper>),
     TextField(TextField<TextInput<D>>),
     List(ListView<MyListView<T, D>>),
     Select(Select),
@@ -671,7 +672,7 @@ impl<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> Cac
         }
     }
 
-    pub fn as_view(&self) -> Option<&View> {
+    pub fn as_view(&self) -> Option<&View<RenderableWrapper>> {
         if let Self::View(v) = self {
             Some(v)
         } else {
@@ -679,7 +680,7 @@ impl<T: Component + Clone + PartialEq, D: AppDelegate + Dispatcher<Message>> Cac
         }
     }
 
-    pub fn as_view_mut(&mut self) -> Option<&mut View> {
+    pub fn as_view_mut(&mut self) -> Option<&mut View<RenderableWrapper>> {
         if let Self::View(v) = self {
             Some(v)
         } else {
@@ -806,3 +807,6 @@ impl PartialEq for Payload {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct RenderableWrapper(Rc<dyn Renderable>);
