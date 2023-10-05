@@ -1,20 +1,20 @@
-use cacao::layout::{Layout, LayoutConstraint};
+use cacao::layout::{Layout, LayoutConstraint, SafeAreaLayoutGuide};
 
 /// Takes a list of views, a parent view that  contains them and returns layout constraints that will position them from top to bottom separated by the specified padding.
 /// The padding is also applied to the sides of each view.
 pub fn top_to_bottom(
     views: Vec<&dyn Layout>,
-    parent: &impl Layout,
+    parent: &SafeAreaLayoutGuide,
     padding: f32,
 ) -> Vec<LayoutConstraint> {
     let (top, bottom) = if let (Some(first), Some(last)) = (views.first(), views.last()) {
         (
             first
                 .get_top()
-                .constraint_equal_to(&parent.get_top())
+                .constraint_equal_to(&parent.top)
                 .offset(padding),
             last.get_bottom()
-                .constraint_equal_to(&parent.get_bottom())
+                .constraint_equal_to(&parent.bottom)
                 .offset(padding),
         )
     } else {
@@ -27,10 +27,10 @@ pub fn top_to_bottom(
     let side_constraints = views.iter().flat_map(|view| {
         [
             view.get_leading()
-                .constraint_equal_to(&parent.get_leading())
+                .constraint_equal_to(&parent.leading)
                 .offset(padding),
             view.get_trailing()
-                .constraint_equal_to(&parent.get_trailing())
+                .constraint_equal_to(&parent.trailing)
                 .offset(padding),
         ]
     });

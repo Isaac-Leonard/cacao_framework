@@ -614,7 +614,11 @@ impl<
             .iter()
             .map(|key| sub_views.get(key).unwrap().as_layout())
             .collect::<Vec<_>>();
-        LayoutConstraint::activate(&top_to_bottom(views_to_render, &self.parent_view, 8.));
+        LayoutConstraint::activate(&top_to_bottom(
+            views_to_render,
+            &self.parent_view.safe_layout_guide,
+            8.,
+        ));
     }
 
     fn get_parent_view(&self) -> &View {

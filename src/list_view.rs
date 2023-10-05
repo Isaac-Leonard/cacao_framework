@@ -144,7 +144,7 @@ impl<
         }
         LayoutConstraint::activate(&top_to_bottom(
             self.sub_views.iter().map(|view| view.as_layout()).collect(),
-            &self.view,
+            &self.view.safe_layout_guide,
             8.,
         ));
     }
