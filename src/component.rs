@@ -51,7 +51,6 @@ impl ViewDelegate for &dyn Renderable {
     fn did_load(&mut self, view: cacao::view::View) {
         self.render();
         view.add_subview(self.get_parent_view());
-        LayoutConstraint::activate(&top_to_bottom(vec![self.get_parent_view()], &view, 8.));
     }
 }
 
